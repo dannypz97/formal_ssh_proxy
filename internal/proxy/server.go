@@ -11,12 +11,14 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/dparv/ssh-proxy/internal/config"
+	"github.com/dparv/ssh-proxy/internal/summarizer"
 )
 
 // Server is the SSH proxy server.
 type Server struct {
-	cfg       *config.Config
-	sshConfig *ssh.ServerConfig
+	cfg            *config.Config
+	sshConfig      *ssh.ServerConfig
+	summaryWorker  *summarizer.Worker
 }
 
 // NewServer creates a proxy server from the given configuration.
@@ -39,6 +41,13 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	sshCfg.AddHostKey(hostKey)
 
 	s.sshConfig = sshCfg
+
+	// Set up optional LLM summarizer.
+	if sum := summarizer.NewSummarizer(&cfg.LLM); sum != nil {
+		s.summaryWorker = summarizer.NewWorker(sum, 4)
+		log.Printf("LLM session summarizer enabled (provider: %s, model: %s)", cfg.LLM.Provider, cfg.LLM.Model)
+	}
+
 	return s, nil
 }
 

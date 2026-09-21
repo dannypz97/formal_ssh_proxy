@@ -95,6 +95,11 @@ func (s *Server) handleChannel(username string, upstreamClient *ssh.Client, newC
 
 	if sessionLog != nil {
 		log.Printf("session log complete: %s", sessionLog.LogPath)
+
+		// Submit for async LLM security summary if enabled.
+		if s.summaryWorker != nil {
+			s.summaryWorker.Submit(sessionLog.LogPath, username)
+		}
 	}
 }
 
