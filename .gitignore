@@ -1,0 +1,35 @@
+# Binaries
+ssh-proxy
+ssh-proxy.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets (keep the example)
+config.yaml
+
+# Session logs
+/logs/
+
+# Docker volumes
+/data/

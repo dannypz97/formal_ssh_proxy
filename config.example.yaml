@@ -1,0 +1,42 @@
+# SSH Proxy configuration
+# Copy this file, fill in the values, and pass the path with -config.
+
+# Address the proxy listens on (default: 0.0.0.0:2022).
+listen: "0.0.0.0:2022"
+
+# Path to the proxy's own SSH host key (PEM format).
+# Generate one with: ssh-keygen -t ed25519 -f host_key -N ""
+host_key: "/etc/ssh-proxy/host_key"
+
+# Upstream SSH server the proxy forwards connections to.
+upstream:
+  host: "upstream"
+  port: 22
+  username: "root"
+  # Authenticate with password:
+  password: "changeme"
+  # Or authenticate with a private key (PEM file):
+  # private_key: "/etc/ssh-proxy/upstream_key"
+
+# Users allowed to connect to the proxy.
+# Public-key auth is tried first; password is the fallback.
+users:
+  - username: "alice"
+    password: "alice-secret"
+    # Optional: path to an OpenSSH authorized public key file.
+    # public_key: "/etc/ssh-proxy/alice.pub"
+
+  - username: "bob"
+    password: "bob-secret"
+
+# Directory where session logs are written (default: ./logs).
+log_dir: "/var/log/ssh-proxy"
+
+# Optional: LLM-based security assessment of session transcripts.
+# Omit or leave api_key empty to disable.
+llm:
+  # Provider: "anthropic" (default) or "openai".
+  provider: "anthropic"
+  api_key: ""
+  # Model override (defaults: claude-sonnet-4-6 for Anthropic, gpt-4o for OpenAI).
+  # model: "claude-opus-5"
