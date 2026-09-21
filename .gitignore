@@ -27,6 +27,11 @@ Thumbs.db
 
 # Config with secrets (keep the example)
 config.yaml
+# Don't ignore deploy/config.yaml (test config, no real secrets)
+!deploy/config.yaml
+
+# Generated keys
+deploy/keys/
 
 # Session logs
 /logs/

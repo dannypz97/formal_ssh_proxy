@@ -1,0 +1,19 @@
+services:
+  upstream:
+    build:
+      context: deploy/upstream
+    ports:
+      - "2222:22"
+
+  proxy:
+    build:
+      context: .
+    command: ["-config", "/etc/ssh-proxy/config.yaml"]
+    ports:
+      - "2022:2022"
+    volumes:
+      - ./deploy/config.yaml:/etc/ssh-proxy/config.yaml:ro
+      - ./deploy/keys:/etc/ssh-proxy/keys:ro
+      - ./logs:/var/log/ssh-proxy
+    depends_on:
+      - upstream

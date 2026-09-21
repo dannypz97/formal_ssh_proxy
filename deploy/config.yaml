@@ -1,0 +1,22 @@
+# Docker test environment configuration.
+listen: "0.0.0.0:2022"
+host_key: "/etc/ssh-proxy/keys/host_key"
+
+upstream:
+  host: "upstream"
+  port: 22
+  username: "testuser"
+  password: "testpass"
+
+users:
+  - username: "alice"
+    password: "alice123"
+  - username: "bob"
+    password: "bob123"
+
+log_dir: "/var/log/ssh-proxy"
+
+# LLM disabled by default (no api_key).
+# llm:
+#   provider: "anthropic"
+#   api_key: ""
