@@ -10,21 +10,20 @@ import (
 
 // proxyChannels accepts channels from the client and proxies each one to the
 // upstream server. It blocks until the client connection is done.
-func (s *Server) proxyChannels(serverConn *ssh.ServerConn, upstreamClient *ssh.Client, clientChans <-chan ssh.NewChannel) {
+func (s *Server) proxyChannels(username string, upstreamClient *ssh.Client, clientChans <-chan ssh.NewChannel) {
 	for newChan := range clientChans {
-		go s.handleChannel(serverConn, upstreamClient, newChan)
+		go s.handleChannel(username, upstreamClient, newChan)
 	}
 }
 
 // handleChannel proxies a single channel (typically "session") between the
-// client and upstream.
-func (s *Server) handleChannel(serverConn *ssh.ServerConn, upstreamClient *ssh.Client, newChan ssh.NewChannel) {
+// client and upstream, logging client stdin to a per-session file.
+func (s *Server) handleChannel(username string, upstreamClient *ssh.Client, newChan ssh.NewChannel) {
 	chanType := newChan.ChannelType()
 
 	// Open a matching channel on the upstream side.
 	upstreamChan, upstreamReqs, err := upstreamClient.OpenChannel(chanType, newChan.ExtraData())
 	if err != nil {
-		// If upstream rejects, reject the client with the same reason.
 		if openErr, ok := err.(*ssh.OpenChannelError); ok {
 			newChan.Reject(openErr.Reason, openErr.Message)
 		} else {
@@ -41,6 +40,19 @@ func (s *Server) handleChannel(serverConn *ssh.ServerConn, upstreamClient *ssh.C
 		return
 	}
 	defer clientChan.Close()
+
+	// Set up session logger for session channels.
+	var sessionLog *SessionLogger
+	if chanType == "session" {
+		sl, err := NewSessionLogger(s.cfg.LogDir, username)
+		if err != nil {
+			log.Printf("warning: could not create session log: %v", err)
+		} else {
+			sessionLog = sl
+			defer sl.Close()
+			log.Printf("session log started: %s", sl.LogPath)
+		}
+	}
 
 	// Proxy requests and data bidirectionally.
 	var wg sync.WaitGroup
@@ -59,16 +71,19 @@ func (s *Server) handleChannel(serverConn *ssh.ServerConn, upstreamClient *ssh.C
 		proxyRequests(upstreamReqs, clientChan)
 	}()
 
-	// Forward data: client → upstream (this is the stdin we'll log in Phase 2).
+	// Forward data: client → upstream, teeing stdin to the session log.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		io.Copy(upstreamChan, clientChan)
-		// Signal EOF to upstream when client stops sending.
+		var dst io.Writer = upstreamChan
+		if sessionLog != nil {
+			dst = io.MultiWriter(upstreamChan, sessionLog)
+		}
+		io.Copy(dst, clientChan)
 		upstreamChan.CloseWrite()
 	}()
 
-	// Forward data: upstream → client (stdout/stderr back to client).
+	// Forward data: upstream → client.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -77,6 +92,10 @@ func (s *Server) handleChannel(serverConn *ssh.ServerConn, upstreamClient *ssh.C
 	}()
 
 	wg.Wait()
+
+	if sessionLog != nil {
+		log.Printf("session log complete: %s", sessionLog.LogPath)
+	}
 }
 
 // proxyRequests forwards SSH channel requests (pty-req, shell, exec,

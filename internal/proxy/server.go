@@ -89,8 +89,8 @@ func (s *Server) handleConnection(netConn net.Conn) {
 	// Discard global requests (keepalives, etc.) — reply OK to keepalives.
 	go ssh.DiscardRequests(reqs)
 
-	// Proxy channels.
-	s.proxyChannels(serverConn, upstreamClient, chans)
+	// Proxy channels, passing username for session logging.
+	s.proxyChannels(username, upstreamClient, chans)
 
 	log.Printf("user %q disconnected", username)
 }
