@@ -1,6 +1,6 @@
-# Binaries
-ssh-proxy
-ssh-proxy.exe
+# Binaries (root only, not cmd/ssh-proxy/ source dir)
+/ssh-proxy
+/ssh-proxy.exe
 *.exe
 *.dll
 *.so
