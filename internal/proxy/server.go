@@ -30,7 +30,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		PublicKeyCallback: s.publicKeyCallback,
 	}
 
-	hostKeyBytes, err := os.ReadFile(cfg.HostKey)
+	hostKeyBytes, err := os.ReadFile(cfg.HostKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading host key: %w", err)
 	}
@@ -111,8 +111,8 @@ func (s *Server) dialUpstream() (*ssh.Client, error) {
 	var authMethods []ssh.AuthMethod
 
 	// Try private key first if configured.
-	if up.PrivateKey != "" {
-		keyBytes, err := os.ReadFile(up.PrivateKey)
+	if up.PrivateKeyPath != "" {
+		keyBytes, err := os.ReadFile(up.PrivateKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("reading upstream private key: %w", err)
 		}
@@ -156,11 +156,11 @@ func (s *Server) passwordCallback(conn ssh.ConnMetadata, password []byte) (*ssh.
 // publicKeyCallback authenticates a client by public key.
 func (s *Server) publicKeyCallback(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 	for _, u := range s.cfg.Users {
-		if u.Username != conn.User() || u.PublicKey == "" {
+		if u.Username != conn.User() || u.PublicKeyPath == "" {
 			continue
 		}
 
-		pubKeyBytes, err := os.ReadFile(u.PublicKey)
+		pubKeyBytes, err := os.ReadFile(u.PublicKeyPath)
 		if err != nil {
 			log.Printf("warning: cannot read public key for user %q: %v", u.Username, err)
 			continue

@@ -28,6 +28,10 @@ func main() {
 	log.Printf("config loaded: listen=%s upstream=%s users=%d llm=%v",
 		cfg.Listen, cfg.Upstream.Addr(), len(cfg.Users), cfg.LLMEnabled())
 
+	if err := cfg.EnsureLogDir(); err != nil {
+		log.Fatalf("failed to create log directory: %v", err)
+	}
+
 	srv, err := proxy.NewServer(cfg)
 	if err != nil {
 		log.Fatalf("failed to create server: %v", err)

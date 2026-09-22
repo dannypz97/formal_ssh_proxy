@@ -9,32 +9,42 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Defaults for configuration values not specified in the YAML file.
+const (
+	DefaultListenAddr    = "0.0.0.0:2022"
+	DefaultUpstreamPort  = 22
+	DefaultLogDir        = "./logs"
+	DefaultLLMProvider   = "anthropic"
+	DefaultAnthropicModel = "claude-sonnet-4-6"
+	DefaultOpenAIModel   = "gpt-4o"
+)
+
 // Config is the top-level proxy configuration.
 type Config struct {
-	Listen   string         `yaml:"listen"`
-	HostKey  string         `yaml:"host_key"`
-	Upstream UpstreamConfig `yaml:"upstream"`
-	Users    []UserConfig   `yaml:"users"`
-	LogDir   string         `yaml:"log_dir"`
-	LLM      LLMConfig     `yaml:"llm"`
+	Listen     string         `yaml:"listen"`
+	HostKeyPath string        `yaml:"host_key"`
+	Upstream   UpstreamConfig `yaml:"upstream"`
+	Users      []UserConfig   `yaml:"users"`
+	LogDir     string         `yaml:"log_dir"`
+	LLM        LLMConfig     `yaml:"llm"`
 }
 
 // UpstreamConfig describes how to connect to the upstream SSH server.
 type UpstreamConfig struct {
-	Host       string `yaml:"host"`
-	Port       int    `yaml:"port"`
-	Username   string `yaml:"username"`
-	Password   string `yaml:"password"`
-	PrivateKey string `yaml:"private_key"` // path to PEM file
+	Host           string `yaml:"host"`
+	Port           int    `yaml:"port"`
+	Username       string `yaml:"username"`
+	Password       string `yaml:"password"`
+	PrivateKeyPath string `yaml:"private_key"` // path to PEM file
 }
 
 // UserConfig describes a user allowed to connect to the proxy.
-// If PublicKey is set, public-key auth is tried first.
+// If PublicKeyPath is set, public-key auth is tried first.
 // If Password is set, password auth is used as a fallback.
 type UserConfig struct {
-	Username  string `yaml:"username"`
-	Password  string `yaml:"password"`
-	PublicKey string `yaml:"public_key"` // path to authorized public key file (OpenSSH format)
+	Username      string `yaml:"username"`
+	Password      string `yaml:"password"`
+	PublicKeyPath string `yaml:"public_key"` // path to authorized public key file (OpenSSH format)
 }
 
 // LLMConfig controls the optional session-summary feature.
@@ -53,8 +63,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	cfg := &Config{
-		// Defaults
-		Listen: "0.0.0.0:2022",
+		Listen: DefaultListenAddr,
 	}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parsing config file: %w", err)
@@ -67,14 +76,17 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// validate checks that the configuration is complete and consistent.
+// It applies defaults for optional fields but does not create directories
+// or perform other side effects.
 func (c *Config) validate() error {
 	var errs []string
 
 	// Host key is required.
-	if c.HostKey == "" {
+	if c.HostKeyPath == "" {
 		errs = append(errs, "host_key is required")
-	} else if !fileExists(c.HostKey) {
-		errs = append(errs, fmt.Sprintf("host_key file not found: %s", c.HostKey))
+	} else if !fileExists(c.HostKeyPath) {
+		errs = append(errs, fmt.Sprintf("host_key file not found: %s", c.HostKeyPath))
 	}
 
 	// Upstream validation.
@@ -82,16 +94,16 @@ func (c *Config) validate() error {
 		errs = append(errs, "upstream.host is required")
 	}
 	if c.Upstream.Port == 0 {
-		c.Upstream.Port = 22
+		c.Upstream.Port = DefaultUpstreamPort
 	}
 	if c.Upstream.Username == "" {
 		errs = append(errs, "upstream.username is required")
 	}
-	if c.Upstream.Password == "" && c.Upstream.PrivateKey == "" {
+	if c.Upstream.Password == "" && c.Upstream.PrivateKeyPath == "" {
 		errs = append(errs, "upstream: at least one of password or private_key is required")
 	}
-	if c.Upstream.PrivateKey != "" && !fileExists(c.Upstream.PrivateKey) {
-		errs = append(errs, fmt.Sprintf("upstream.private_key file not found: %s", c.Upstream.PrivateKey))
+	if c.Upstream.PrivateKeyPath != "" && !fileExists(c.Upstream.PrivateKeyPath) {
+		errs = append(errs, fmt.Sprintf("upstream.private_key file not found: %s", c.Upstream.PrivateKeyPath))
 	}
 
 	// Users validation.
@@ -108,37 +120,34 @@ func (c *Config) validate() error {
 			errs = append(errs, fmt.Sprintf("users[%d]: duplicate username %q", i, u.Username))
 		}
 		seen[u.Username] = true
-		if u.Password == "" && u.PublicKey == "" {
+		if u.Password == "" && u.PublicKeyPath == "" {
 			errs = append(errs, fmt.Sprintf("users[%d] (%s): at least one of password or public_key is required", i, u.Username))
 		}
-		if u.PublicKey != "" && !fileExists(u.PublicKey) {
-			errs = append(errs, fmt.Sprintf("users[%d] (%s): public_key file not found: %s", i, u.Username, u.PublicKey))
+		if u.PublicKeyPath != "" && !fileExists(u.PublicKeyPath) {
+			errs = append(errs, fmt.Sprintf("users[%d] (%s): public_key file not found: %s", i, u.Username, u.PublicKeyPath))
 		}
 	}
 
-	// Log directory: default and create if needed.
+	// Log directory default.
 	if c.LogDir == "" {
-		c.LogDir = "./logs"
-	}
-	if err := os.MkdirAll(c.LogDir, 0o750); err != nil {
-		errs = append(errs, fmt.Sprintf("cannot create log directory %s: %v", c.LogDir, err))
+		c.LogDir = DefaultLogDir
 	}
 
 	// LLM validation.
 	if c.LLM.APIKey != "" {
 		p := strings.ToLower(c.LLM.Provider)
 		if p == "" {
-			c.LLM.Provider = "anthropic"
-			p = "anthropic"
+			c.LLM.Provider = DefaultLLMProvider
+			p = DefaultLLMProvider
 		}
 		switch p {
 		case "anthropic":
 			if c.LLM.Model == "" {
-				c.LLM.Model = "claude-sonnet-4-6"
+				c.LLM.Model = DefaultAnthropicModel
 			}
 		case "openai":
 			if c.LLM.Model == "" {
-				c.LLM.Model = "gpt-4o"
+				c.LLM.Model = DefaultOpenAIModel
 			}
 		default:
 			errs = append(errs, fmt.Sprintf("llm.provider: unsupported provider %q (use \"anthropic\" or \"openai\")", c.LLM.Provider))
@@ -152,18 +161,25 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// EnsureLogDir creates the log directory if it does not already exist.
+// Call this at startup, after Load.
+func (c *Config) EnsureLogDir() error {
+	return os.MkdirAll(c.LogDir, 0o750)
+}
+
 // Addr returns the upstream address as host:port.
 func (u *UpstreamConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", u.Host, u.Port)
 }
 
 // LLMEnabled reports whether a valid LLM configuration is present.
+// This is reliable only after Load (which calls validate), because validate
+// populates Provider when only APIKey is given.
 func (c *Config) LLMEnabled() bool {
 	return c.LLM.APIKey != ""
 }
 
-// ResolveHostKeyPath returns the absolute path of the host key, resolved
-// relative to the config file directory if not already absolute.
+// ResolveRelativeTo returns path as-is if absolute, otherwise joined to base.
 func ResolveRelativeTo(base, path string) string {
 	if filepath.IsAbs(path) {
 		return path

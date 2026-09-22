@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,11 +90,14 @@ users:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if cfg.Listen != "0.0.0.0:2022" {
-		t.Errorf("listen = %q, want default 0.0.0.0:2022", cfg.Listen)
+	if cfg.Listen != DefaultListenAddr {
+		t.Errorf("listen = %q, want default %q", cfg.Listen, DefaultListenAddr)
 	}
-	if cfg.Upstream.Port != 22 {
-		t.Errorf("upstream.port = %d, want default 22", cfg.Upstream.Port)
+	if cfg.Upstream.Port != DefaultUpstreamPort {
+		t.Errorf("upstream.port = %d, want default %d", cfg.Upstream.Port, DefaultUpstreamPort)
+	}
+	if cfg.LogDir != DefaultLogDir {
+		t.Errorf("log_dir = %q, want default %q", cfg.LogDir, DefaultLogDir)
 	}
 }
 
@@ -122,11 +126,11 @@ llm:
 	if !cfg.LLMEnabled() {
 		t.Error("LLMEnabled() = false, want true")
 	}
-	if cfg.LLM.Provider != "anthropic" {
-		t.Errorf("llm.provider = %q, want anthropic (default)", cfg.LLM.Provider)
+	if cfg.LLM.Provider != DefaultLLMProvider {
+		t.Errorf("llm.provider = %q, want default %q", cfg.LLM.Provider, DefaultLLMProvider)
 	}
-	if cfg.LLM.Model != "claude-sonnet-4-6" {
-		t.Errorf("llm.model = %q, want claude-sonnet-4-6 (default)", cfg.LLM.Model)
+	if cfg.LLM.Model != DefaultAnthropicModel {
+		t.Errorf("llm.model = %q, want default %q", cfg.LLM.Model, DefaultAnthropicModel)
 	}
 }
 
@@ -156,8 +160,8 @@ llm:
 	if cfg.LLM.Provider != "openai" {
 		t.Errorf("llm.provider = %q, want openai", cfg.LLM.Provider)
 	}
-	if cfg.LLM.Model != "gpt-4o" {
-		t.Errorf("llm.model = %q, want gpt-4o (default)", cfg.LLM.Model)
+	if cfg.LLM.Model != DefaultOpenAIModel {
+		t.Errorf("llm.model = %q, want default %q", cfg.LLM.Model, DefaultOpenAIModel)
 	}
 }
 
@@ -174,7 +178,7 @@ func TestLoadMissingFields(t *testing.T) {
 	}
 
 	for _, want := range []string{"host_key", "upstream.host", "upstream.username", "at least one user"} {
-		if !contains(err.Error(), want) {
+		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q should mention %q", err, want)
 		}
 	}
@@ -201,7 +205,7 @@ users:
 	if err == nil {
 		t.Fatal("expected error for duplicate username")
 	}
-	if !contains(err.Error(), "duplicate") {
+	if !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("error %q should mention 'duplicate'", err)
 	}
 }
@@ -228,7 +232,7 @@ llm:
 	if err == nil {
 		t.Fatal("expected error for unsupported provider")
 	}
-	if !contains(err.Error(), "unsupported provider") {
+	if !strings.Contains(err.Error(), "unsupported provider") {
 		t.Errorf("error %q should mention 'unsupported provider'", err)
 	}
 }
@@ -238,17 +242,4 @@ func TestLoadMissingFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && searchString(s, sub)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
