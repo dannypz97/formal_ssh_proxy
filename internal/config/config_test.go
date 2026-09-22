@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// helper to write a temp file with the given content.
-// Returns the path with forward slashes so it's safe to embed in YAML.
+// writeTempFile writes content to dir/name and returns the path with forward
+// slashes so it's safe to embed in YAML on Windows.
 func writeTempFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -18,15 +18,33 @@ func writeTempFile(t *testing.T, dir, name, content string) string {
 	return filepath.ToSlash(path)
 }
 
-// yamlPath converts a path to forward slashes for safe YAML embedding.
-func yamlPath(p string) string {
-	return filepath.ToSlash(p)
+// baseConfigYAML returns a minimal valid YAML config string. It creates a
+// dummy host key in dir and wires up the required fields. Callers can append
+// extra YAML sections (llm, extra users, etc.) to the returned string.
+func baseConfigYAML(t *testing.T, dir string) string {
+	t.Helper()
+	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
+	return `
+host_key: "` + hostKey + `"
+upstream:
+  host: "upstream"
+  username: "root"
+  password: "pw"
+users:
+  - username: "alice"
+    password: "pw"
+`
+}
+
+// loadFromYAML is a shorthand: writes cfgYAML to a temp file and calls Load.
+func loadFromYAML(t *testing.T, dir, cfgYAML string) (*Config, error) {
+	t.Helper()
+	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
+	return Load(cfgPath)
 }
 
 func TestLoadValid(t *testing.T) {
 	dir := t.TempDir()
-
-	// Create dummy host key and public key files.
 	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
 	pubKey := writeTempFile(t, dir, "alice.pub", "ssh-ed25519 AAAA...")
 
@@ -44,11 +62,10 @@ users:
     public_key: "` + pubKey + `"
   - username: "bob"
     password: "bobpw"
-log_dir: "` + yamlPath(filepath.Join(dir, "logs")) + `"
+log_dir: "` + filepath.ToSlash(filepath.Join(dir, "logs")) + `"
 `
 
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	cfg, err := Load(cfgPath)
+	cfg, err := loadFromYAML(t, dir, cfgYAML)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,20 +89,7 @@ log_dir: "` + yamlPath(filepath.Join(dir, "logs")) + `"
 
 func TestLoadDefaults(t *testing.T) {
 	dir := t.TempDir()
-	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
-
-	cfgYAML := `
-host_key: "` + hostKey + `"
-upstream:
-  host: "upstream"
-  username: "root"
-  password: "pw"
-users:
-  - username: "alice"
-    password: "pw"
-`
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	cfg, err := Load(cfgPath)
+	cfg, err := loadFromYAML(t, dir, baseConfigYAML(t, dir))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,22 +107,11 @@ users:
 
 func TestLoadLLMDefaults(t *testing.T) {
 	dir := t.TempDir()
-	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
-
-	cfgYAML := `
-host_key: "` + hostKey + `"
-upstream:
-  host: "upstream"
-  username: "root"
-  password: "pw"
-users:
-  - username: "alice"
-    password: "pw"
+	cfgYAML := baseConfigYAML(t, dir) + `
 llm:
   api_key: "sk-ant-test-key"
 `
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	cfg, err := Load(cfgPath)
+	cfg, err := loadFromYAML(t, dir, cfgYAML)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,23 +129,12 @@ llm:
 
 func TestLoadLLMOpenAI(t *testing.T) {
 	dir := t.TempDir()
-	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
-
-	cfgYAML := `
-host_key: "` + hostKey + `"
-upstream:
-  host: "upstream"
-  username: "root"
-  password: "pw"
-users:
-  - username: "alice"
-    password: "pw"
+	cfgYAML := baseConfigYAML(t, dir) + `
 llm:
   provider: "openai"
   api_key: "sk-openai-test"
 `
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	cfg, err := Load(cfgPath)
+	cfg, err := loadFromYAML(t, dir, cfgYAML)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -169,10 +151,7 @@ func TestLoadMissingFields(t *testing.T) {
 	dir := t.TempDir()
 
 	// No host_key, no upstream, no users.
-	cfgYAML := `listen: ":2022"`
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-
-	_, err := Load(cfgPath)
+	_, err := loadFromYAML(t, dir, `listen: ":2022"`)
 	if err == nil {
 		t.Fatal("expected error for missing required fields")
 	}
@@ -200,8 +179,7 @@ users:
   - username: "alice"
     password: "pw2"
 `
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	_, err := Load(cfgPath)
+	_, err := loadFromYAML(t, dir, cfgYAML)
 	if err == nil {
 		t.Fatal("expected error for duplicate username")
 	}
@@ -212,23 +190,12 @@ users:
 
 func TestLoadBadProvider(t *testing.T) {
 	dir := t.TempDir()
-	hostKey := writeTempFile(t, dir, "host_key", "fake-key")
-
-	cfgYAML := `
-host_key: "` + hostKey + `"
-upstream:
-  host: "upstream"
-  username: "root"
-  password: "pw"
-users:
-  - username: "alice"
-    password: "pw"
+	cfgYAML := baseConfigYAML(t, dir) + `
 llm:
   provider: "gemini"
   api_key: "some-key"
 `
-	cfgPath := writeTempFile(t, dir, "config.yaml", cfgYAML)
-	_, err := Load(cfgPath)
+	_, err := loadFromYAML(t, dir, cfgYAML)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider")
 	}
