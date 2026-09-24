@@ -43,8 +43,8 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	s.sshConfig = sshCfg
 
 	// Set up optional LLM summarizer.
-	if sum := summarizer.NewSummarizer(&cfg.LLM); sum != nil {
-		s.summaryWorker = summarizer.NewWorker(sum, 4)
+	if summ := summarizer.NewSummarizer(&cfg.LLM); summ != nil {
+		s.summaryWorker = summarizer.NewWorker(summ, 4)
 		log.Printf("LLM session summarizer enabled (provider: %s, model: %s)", cfg.LLM.Provider, cfg.LLM.Model)
 	}
 

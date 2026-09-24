@@ -90,16 +90,11 @@ func TestSanitizeFilename(t *testing.T) {
 		{"user/name", "user_name"},
 		{"user\\name", "user_name"},
 		{"user:name", "user_name"},
-		{"../etc/passwd", "_/etc/passwd"}, // ".." replaced, "/" replaced
+		{"../etc/passwd", "__etc_passwd"}, // ".." → "_", each "/" → "_"
 	}
 	for _, tt := range tests {
 		got := sanitizeFilename(tt.input)
-		// For the "../" case, both ".." and "/" get replaced.
-		if tt.input == "../etc/passwd" {
-			if !strings.Contains(got, "_") {
-				t.Errorf("sanitizeFilename(%q) = %q, expected dangerous chars replaced", tt.input, got)
-			}
-		} else if got != tt.want {
+		if got != tt.want {
 			t.Errorf("sanitizeFilename(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
