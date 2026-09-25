@@ -48,7 +48,9 @@ llm:
   # "anthropic" (default) or "openai".
   provider: "anthropic"
   api_key: ""
-  # Model override (defaults: claude-opus-5 for Anthropic, gpt-4o for OpenAI).
-  # model: "claude-sonnet-5"
+  # Optional; defaults to claude-opus-5 (anthropic) or gpt-4o (openai).
+  # Must match the provider, e.g. "claude-opus-5", "claude-opus-4-6",
+  # "claude-sonnet-5" (anthropic) or "gpt-4o" (openai).
+  model: "claude-opus-5"
   # Max transcript size sent to the LLM, in bytes (default: 100000).
   # max_transcript_chars: 100000

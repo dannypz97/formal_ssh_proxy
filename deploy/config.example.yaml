@@ -1,0 +1,42 @@
+# Docker Compose test environment configuration (template).
+#
+# deploy/setup.sh copies this to deploy/config.yaml, which is what the proxy
+# container uses. deploy/config.yaml is git-ignored: put your API key there,
+# never in this file.
+#
+# Keys under /etc/ssh-proxy/keys are created by deploy/setup.sh.
+listen: "0.0.0.0:2022"
+host_key: "/etc/ssh-proxy/keys/host_key"
+
+upstream:
+  host: "upstream"
+  port: 22
+  username: "testuser"
+  # Public-key auth to the upstream; the password is the fallback.
+  private_key: "/etc/ssh-proxy/keys/upstream_client_key"
+  password: "testpass"
+  # Verify the upstream's host key.
+  known_hosts: "/etc/ssh-proxy/keys/known_hosts"
+
+users:
+  # Public key first, password as a fallback.
+  - username: "alice"
+    public_key: "/etc/ssh-proxy/keys/alice_key.pub"
+    password: "alice123"
+  # Password only.
+  - username: "bob"
+    password: "bob123"
+
+log_dir: "/var/log/ssh-proxy"
+
+# LLM security summaries: disabled while api_key is empty.
+llm:
+  # "anthropic" or "openai".
+  provider: "anthropic"
+  api_key: ""
+  # Optional; defaults to claude-opus-5 (anthropic) or gpt-4o (openai).
+  # Must match the provider, e.g. "claude-opus-5", "claude-opus-4-6",
+  # "claude-sonnet-5" (anthropic) or "gpt-4o" (openai).
+  model: "claude-opus-5"
+  # Optional; max transcript size sent to the LLM, in bytes.
+  # max_transcript_chars: 100000

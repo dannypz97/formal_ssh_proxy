@@ -26,10 +26,9 @@ coverage.html
 .DS_Store
 Thumbs.db
 
-# Config with secrets (keep the example)
+# Configs hold secrets (passwords, API keys); only the *.example.yaml
+# templates are committed. This covers ./config.yaml and deploy/config.yaml.
 config.yaml
-# Don't ignore deploy/config.yaml (test config, no real secrets)
-!deploy/config.yaml
 
 # Generated keys
 deploy/keys/
