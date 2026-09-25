@@ -24,8 +24,8 @@ Client ──SSH──▶ Proxy ──SSH──▶ Upstream
 Requires Docker with Compose, and `ssh-keygen` on the host.
 
 ```bash
-# 1. Generate the keys used by the test environment (into deploy/keys/)
-./deploy/generate-keys.sh
+# 1. Create deploy/config.yaml and the keys used by the test environment
+./deploy/setup.sh
 
 # 2. Start the proxy and the test upstream
 docker compose up --build
@@ -44,11 +44,13 @@ What the compose setup mounts:
 
 | Host path | Container path | Purpose |
 |-----------|----------------|---------|
-| `deploy/config.yaml` | `/etc/ssh-proxy/config.yaml` (read-only) | Proxy configuration |
+| `deploy/config.yaml` | `/etc/ssh-proxy/config.yaml` (read-only) | Proxy configuration (created from `deploy/config.example.yaml`) |
 | `deploy/keys/` | `/etc/ssh-proxy/keys/` (read-only) | Proxy host key, client/upstream keys, `known_hosts` |
 | `logs/` | `/var/log/ssh-proxy/` | Session logs and summaries |
 
-The test environment exercises every auth path. `alice` uses a public key with a password fallback, and `bob` uses a password only. The proxy logs in to the upstream with a key and verifies the upstream's host key. To enable LLM summaries, add an `llm` section with an API key to `deploy/config.yaml` and restart.
+The test environment exercises every auth path. `alice` uses a public key with a password fallback, and `bob` uses a password only. The proxy logs in to the upstream with a key and verifies the upstream's host key. To enable LLM summaries, set `llm.api_key` (and optionally `llm.model`) in `deploy/config.yaml`, then run `docker compose restart proxy`.
+
+`deploy/config.yaml` is git-ignored so that your API key can't be committed by accident. Only the template, `deploy/config.example.yaml`, is tracked. To pick up later template changes, compare the two files, or delete `deploy/config.yaml` and re-run `./deploy/setup.sh`.
 
 ## Build and run from source
 
@@ -57,7 +59,7 @@ Requires Go 1.26+.
 ```bash
 go build -o ssh-proxy ./cmd/ssh-proxy/
 
-cp config.example.yaml config.yaml         # edit as needed
+cp config.example.yaml config.yaml         # edit as needed (git-ignored)
 ssh-keygen -t ed25519 -f host_key -N ""     # proxy host key
 
 ./ssh-proxy -config config.yaml
@@ -223,8 +225,8 @@ internal/
   summarizer/             LLM interface, Anthropic/OpenAI providers, worker pool
   transcript/             Raw stdin → readable text (used by summarizer and cleanlog)
 deploy/
-  config.yaml             Config used by docker compose
-  generate-keys.sh        Generates all keys for the test environment
+  config.example.yaml     Template for deploy/config.yaml, the (git-ignored) Compose config
+  setup.sh                Creates deploy/config.yaml and all keys for the test environment
   upstream/               Test upstream: Alpine + OpenSSH
 Dockerfile                Multi-stage build for the proxy
 docker-compose.yml        Proxy + upstream test environment
