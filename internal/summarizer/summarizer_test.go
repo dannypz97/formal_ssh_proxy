@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dparv/ssh-proxy/internal/config"
 )
@@ -66,7 +68,7 @@ func TestCleanTranscript(t *testing.T) {
 		{
 			name:  "carriage return to newline",
 			input: "line1\r\nline2",
-			want:  "line1\n\nline2",
+			want:  "line1\nline2",
 		},
 		{
 			name:  "tab preserved",
@@ -77,6 +79,26 @@ func TestCleanTranscript(t *testing.T) {
 			name:  "cursor movement stripped",
 			input: "text\x1b[Amore",
 			want:  "textmore",
+		},
+		{
+			name:  "application-mode arrow key (SS3) stripped",
+			input: "ls\x1bOA\x1bOB -l",
+			want:  "ls -l",
+		},
+		{
+			name:  "bracketed paste markers stripped",
+			input: "\x1b[200~rm -rf /\x1b[201~",
+			want:  "rm -rf /",
+		},
+		{
+			name:  "backspace removes whole UTF-8 character",
+			input: "caf\xc3\xa9\x7fe",
+			want:  "cafe",
+		},
+		{
+			name:  "backspace does not cross a newline",
+			input: "ls\n\x7f\x7fpwd",
+			want:  "ls\npwd",
 		},
 	}
 
@@ -119,6 +141,13 @@ func TestFormatPromptCustomLimit(t *testing.T) {
 	}
 	if strings.Contains(result, "fghij") {
 		t.Error("should not contain chars beyond limit")
+	}
+}
+
+func TestFormatPromptTruncationKeepsUTF8Valid(t *testing.T) {
+	result := FormatPrompt("aé", 2) // "é" is 2 bytes; cutting at 2 would split it
+	if !utf8.ValidString(result) {
+		t.Errorf("truncated prompt is not valid UTF-8: %q", result)
 	}
 }
 
@@ -180,6 +209,8 @@ type stubSummarizer struct {
 	err      error
 	called   int
 }
+
+func (s *stubSummarizer) Validate(context.Context) error { return nil }
 
 func (s *stubSummarizer) Summarize(_ context.Context, _ string) (string, error) {
 	s.called++
@@ -243,20 +274,33 @@ func TestWorkerConcurrencyBound(t *testing.T) {
 
 	w.Wait()
 
-	if slow.called != 4 {
-		t.Errorf("summarizer called %d times, want 4", slow.called)
+	if got := slow.called.Load(); got != 4 {
+		t.Errorf("summarizer called %d times, want 4", got)
 	}
-	// Peak concurrency should not exceed 2 (hard to assert precisely,
-	// but the test proves the semaphore doesn't deadlock).
+	if peak := slow.peak.Load(); peak > 2 {
+		t.Errorf("peak concurrency = %d, want <= 2", peak)
+	}
 }
 
 type slowSummarizer struct {
-	delay  time.Duration
-	called int
+	delay    time.Duration
+	called   atomic.Int32
+	inFlight atomic.Int32
+	peak     atomic.Int32
 }
 
+func (s *slowSummarizer) Validate(context.Context) error { return nil }
+
 func (s *slowSummarizer) Summarize(_ context.Context, _ string) (string, error) {
-	s.called++
+	s.called.Add(1)
+	n := s.inFlight.Add(1)
+	defer s.inFlight.Add(-1)
+	for {
+		p := s.peak.Load()
+		if n <= p || s.peak.CompareAndSwap(p, n) {
+			break
+		}
+	}
 	time.Sleep(s.delay)
 	return "ok", nil
 }

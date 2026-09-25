@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers / Git Bash: never convert to CRLF.
+*.sh text eol=lf
