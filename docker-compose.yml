@@ -4,6 +4,8 @@ services:
       context: deploy/upstream
     ports:
       - "2222:22"
+    volumes:
+      - ./deploy/keys:/keys:ro
 
   proxy:
     build:
