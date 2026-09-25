@@ -13,6 +13,7 @@ Client ──SSH──▶ Proxy ──SSH──▶ Upstream
 
 - **Transparent sessions**: interactive shells, `exec` commands, `scp`/`sftp`, PTYs, **terminal resizing** (`window-change`), signals, environment variables, stdout/stderr, and exit codes are all passed through.
 - **Session logging**: every byte of client stdin is written to `<username>_<UTC start time>.log`, one file per session.
+- **Readable logs**: the bundled `cleanlog` tool turns raw logs into one command per line.
 - **Client authentication**: per-user public key and/or password.
 - **Upstream authentication**: private key and/or password, with optional host-key verification against a `known_hosts` file.
 - **LLM security summaries**: generated asynchronously after each session and written next to the log. The proxy log announces when each one is ready.
@@ -120,12 +121,53 @@ At startup the proxy checks the key and model with the provider. If the provider
 - Content is the **raw** client stdin: keystrokes including control characters and escape sequences for interactive sessions, and file contents for `scp`/`sftp` uploads.
 - Files are created `0640` in a `0750` directory. Treat them as sensitive: anything the user types is recorded, including passwords typed at prompts such as `sudo`, since those are sent over stdin.
 - If the log file cannot be created, the session is refused rather than run unaudited.
+- Commands given on the `ssh` command line (`ssh host 'ls /'`) are sent as a request, not as stdin, so they don't appear in the log.
+
+### Reading session logs
+
+Opened with a plain `cat`, a raw log looks garbled. In an interactive session, Enter is sent as a carriage return, so each command overwrites the previous one on screen. The log also contains raw keystrokes (`^?` for backspace, `^[[A` for the up arrow) and terminal replies such as `^[[50;17R` (a cursor-position report that the terminal sends when the shell asks for it).
+
+`cleanlog` prints logs as readable text, using the same cleaning as the LLM summarizer:
+- one command per line
+- backspaces applied
+- escape sequences removed
+- control keys shown as `[Ctrl+C]`
+- history recall shown as `[Up]`/`[Down]`
+
+```
+$ cleanlog logs/bob_2026-09-25T02-29-49.276Z.log
+ls /
+echo "I want to install a backdoor in this machine."
+[Up] > d
+cat /etc/shadow
+[Ctrl+D]
+```
+
+Ways to run it:
+
+```bash
+# Docker: cleanlog is included in the proxy image (quote the wildcard)
+docker compose exec proxy cleanlog '/var/log/ssh-proxy/bob_*.log'
+
+# From source (needs Go)
+go run ./cmd/cleanlog logs/bob_*.log
+go build -o cleanlog ./cmd/cleanlog        # or build it once (cleanlog.exe on Windows)
+```
+
+- **Several files** are printed one after another, each with a `==> file <==` header.
+- **Wildcards** are expanded by `cleanlog` itself, so they also work in PowerShell and with `docker compose exec`.
+- **`-w`** writes a readable `<session>.txt` next to each log instead of printing. The raw `.log` is never modified.
+- **Reading from stdin:** with no file, or `-`, `cleanlog` reads stdin, e.g. `cat x.log | cleanlog`.
+
+Because the log only contains keystrokes, some things can't be reconstructed:
+- a command recalled with the up arrow appears as `[Up]`, not as its text
+- a Tab completion appears as the characters typed before Tab
 
 ## LLM security summaries
 
 When a session ends, its log path goes to a worker pool with at most 4 concurrent LLM requests. For each session the worker:
 
-1. Cleans the transcript. It strips ANSI/terminal escape sequences, applies backspaces, and annotates notable control characters such as `[Ctrl+C]` and `[Ctrl+D]`.
+1. Cleans the transcript the same way as [`cleanlog`](#reading-session-logs).
 2. Truncates the transcript if needed.
 3. Asks the model for a list of risky actions with a severity for each, plus an overall assessment.
 
@@ -174,10 +216,12 @@ Close handling mirrors a direct connection:
 
 ```
 cmd/ssh-proxy/            Entry point: flag parsing, startup, signal handling
+cmd/cleanlog/             Prints raw session logs as readable text
 internal/
   config/                 YAML loading, validation, defaults
   proxy/                  SSH server, authentication, channel proxying, session logs
   summarizer/             LLM interface, Anthropic/OpenAI providers, worker pool
+  transcript/             Raw stdin → readable text (used by summarizer and cleanlog)
 deploy/
   config.yaml             Config used by docker compose
   generate-keys.sh        Generates all keys for the test environment
@@ -195,4 +239,5 @@ go test -race ./...
 
 - **Proxy tests** (`internal/proxy`) run end to end against an in-process fake SSH upstream. They cover authentication (including the empty-password case), exit codes and stderr, stdin forwarding and logging, window-change forwarding, and rejection of port-forwarding channels.
 - **Config tests** cover validation, defaults, and rejection of unknown keys.
-- **Summarizer tests** cover transcript cleaning, prompt formatting and truncation, and the worker pool's concurrency limit.
+- **Transcript and `cleanlog` tests** cover escape-sequence handling, backspace, control keys, wildcards and `-w`.
+- **Summarizer tests** cover prompt formatting and truncation, and the worker pool's concurrency limit.

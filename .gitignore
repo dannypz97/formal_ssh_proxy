@@ -1,5 +1,6 @@
 # Binaries (root only, not cmd/ssh-proxy/ source dir)
 /ssh-proxy
+/cleanlog
 /ssh-proxy.exe
 *.exe
 *.dll
