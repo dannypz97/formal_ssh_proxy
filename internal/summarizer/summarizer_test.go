@@ -34,8 +34,33 @@ func TestCleanTranscript(t *testing.T) {
 			want:  "helo",
 		},
 		{
-			name:  "control chars stripped",
-			input: "abc\x01\x02\x03def",
+			name:  "Ctrl+C annotated",
+			input: "abc\x03def",
+			want:  "abc[Ctrl+C]def",
+		},
+		{
+			name:  "Ctrl+Z annotated",
+			input: "sleep 999\x1a",
+			want:  "sleep 999[Ctrl+Z]",
+		},
+		{
+			name:  "Ctrl+D annotated",
+			input: "exit\x04",
+			want:  "exit[Ctrl+D]",
+		},
+		{
+			name:  "Ctrl+L annotated",
+			input: "\x0cls",
+			want:  "[Ctrl+L]ls",
+		},
+		{
+			name:  "Ctrl+R annotated",
+			input: "\x12search",
+			want:  "[Ctrl+R]search",
+		},
+		{
+			name:  "unknown control chars stripped",
+			input: "abc\x07\x0bdef",
 			want:  "abcdef",
 		},
 		{
@@ -66,7 +91,7 @@ func TestCleanTranscript(t *testing.T) {
 }
 
 func TestFormatPrompt(t *testing.T) {
-	result := FormatPrompt("whoami")
+	result := FormatPrompt("whoami", 0)
 	if !strings.Contains(result, "whoami") {
 		t.Error("prompt should contain the transcript")
 	}
@@ -77,9 +102,23 @@ func TestFormatPrompt(t *testing.T) {
 
 func TestFormatPromptTruncation(t *testing.T) {
 	long := strings.Repeat("a", 200_000)
-	result := FormatPrompt(long)
+	result := FormatPrompt(long, DefaultMaxTranscriptLen)
 	if !strings.Contains(result, "[truncated]") {
 		t.Error("long transcript should be truncated")
+	}
+}
+
+func TestFormatPromptCustomLimit(t *testing.T) {
+	input := "abcdefghij" // 10 chars
+	result := FormatPrompt(input, 5)
+	if !strings.Contains(result, "[truncated]") {
+		t.Error("should truncate at custom limit")
+	}
+	if !strings.Contains(result, "abcde") {
+		t.Error("should keep first 5 chars")
+	}
+	if strings.Contains(result, "fghij") {
+		t.Error("should not contain chars beyond limit")
 	}
 }
 
@@ -221,4 +260,3 @@ func (s *slowSummarizer) Summarize(_ context.Context, _ string) (string, error) 
 	time.Sleep(s.delay)
 	return "ok", nil
 }
-

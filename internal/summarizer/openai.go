@@ -38,9 +38,7 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
-func (o *openAISummarizer) Summarize(ctx context.Context, transcript string) (string, error) {
-	prompt := FormatPrompt(transcript)
-
+func (o *openAISummarizer) Summarize(ctx context.Context, prompt string) (string, error) {
 	reqBody := chatRequest{
 		Model: o.model,
 		Messages: []chatMessage{

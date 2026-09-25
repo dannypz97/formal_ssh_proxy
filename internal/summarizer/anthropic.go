@@ -20,9 +20,7 @@ func newAnthropicSummarizer(apiKey, model string) *anthropicSummarizer {
 	}
 }
 
-func (a *anthropicSummarizer) Summarize(ctx context.Context, transcript string) (string, error) {
-	prompt := FormatPrompt(transcript)
-
+func (a *anthropicSummarizer) Summarize(ctx context.Context, prompt string) (string, error) {
 	resp, err := a.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     a.model,
 		MaxTokens: 4096,

@@ -13,10 +13,14 @@ import (
 	"github.com/dparv/ssh-proxy/internal/config"
 )
 
+// DefaultMaxTranscriptLen is the character limit applied to transcripts before
+// sending them to the LLM. Keeps requests within context window limits.
+const DefaultMaxTranscriptLen = 100_000
+
 const securityPrompt = `You are a security analyst reviewing an SSH session transcript.
 The transcript below contains the raw standard input captured from a user's SSH session.
-It may include terminal control characters and escape sequences — focus on the actual
-commands and text entered.
+Control characters are annotated (e.g. [Ctrl+C], [Ctrl+Z]). ANSI escape sequences have
+been stripped. Focus on the commands and actions performed.
 
 Analyze the session for potential security risks. For each risk found, describe:
 1. What command or action was performed
@@ -31,6 +35,25 @@ End with a one-paragraph overall assessment.
 %s
 --- END TRANSCRIPT ---`
 
+// Notable control characters and their readable annotations.
+var ctrlLabels = map[byte]string{
+	0x01: "[Ctrl+A]",
+	0x02: "[Ctrl+B]",
+	0x03: "[Ctrl+C]",
+	0x04: "[Ctrl+D]",
+	0x05: "[Ctrl+E]",
+	0x06: "[Ctrl+F]",
+	0x0c: "[Ctrl+L]",
+	0x0e: "[Ctrl+N]",
+	0x0f: "[Ctrl+O]",
+	0x10: "[Ctrl+P]",
+	0x12: "[Ctrl+R]",
+	0x15: "[Ctrl+U]",
+	0x17: "[Ctrl+W]",
+	0x1a: "[Ctrl+Z]",
+	0x1c: "[Ctrl+\\]",
+}
+
 // Summarizer generates a security assessment of a session transcript.
 type Summarizer interface {
 	Summarize(ctx context.Context, transcript string) (string, error)
@@ -38,9 +61,10 @@ type Summarizer interface {
 
 // Worker manages async summarization of completed sessions.
 type Worker struct {
-	summarizer Summarizer
-	wg         sync.WaitGroup
-	sem        chan struct{} // bounds concurrency
+	summarizer      Summarizer
+	maxTranscriptLen int
+	wg              sync.WaitGroup
+	sem             chan struct{} // bounds concurrency
 }
 
 // NewWorker creates a Worker backed by the given Summarizer with bounded
@@ -53,8 +77,16 @@ func NewWorker(s Summarizer, maxConcurrent int) *Worker {
 		maxConcurrent = 4
 	}
 	return &Worker{
-		summarizer: s,
-		sem:        make(chan struct{}, maxConcurrent),
+		summarizer:      s,
+		maxTranscriptLen: DefaultMaxTranscriptLen,
+		sem:             make(chan struct{}, maxConcurrent),
+	}
+}
+
+// SetMaxTranscriptLen overrides the transcript truncation limit.
+func (w *Worker) SetMaxTranscriptLen(n int) {
+	if n > 0 {
+		w.maxTranscriptLen = n
 	}
 }
 
@@ -92,7 +124,7 @@ func (w *Worker) processSession(logPath, username string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	summary, err := w.summarizer.Summarize(ctx, transcript)
+	summary, err := w.summarizer.Summarize(ctx, FormatPrompt(transcript, w.maxTranscriptLen))
 	if err != nil {
 		log.Printf("summarizer: LLM call failed for %s: %v", logPath, err)
 		return
@@ -123,8 +155,9 @@ func NewSummarizer(cfg *config.LLMConfig) Summarizer {
 	}
 }
 
-// cleanTranscript strips common terminal escape sequences and control characters
-// from raw stdin, producing more readable text for the LLM.
+// cleanTranscript strips ANSI escape sequences, annotates notable control
+// characters, and handles backspace — producing readable text for the LLM
+// while preserving security-relevant signals.
 func cleanTranscript(raw string) string {
 	var b strings.Builder
 	b.Grow(len(raw))
@@ -165,7 +198,11 @@ func cleanTranscript(raw string) string {
 				b.Reset()
 				b.WriteString(s[:len(s)-1])
 			}
-		case ch < 0x20: // other control chars — skip
+		case ch < 0x20:
+			// Annotate notable control chars; skip the rest.
+			if label, ok := ctrlLabels[ch]; ok {
+				b.WriteString(label)
+			}
 		default:
 			b.WriteByte(ch)
 		}
@@ -176,10 +213,12 @@ func cleanTranscript(raw string) string {
 	return b.String()
 }
 
-// FormatPrompt wraps the transcript in the security analysis prompt.
-func FormatPrompt(transcript string) string {
-	// Truncate very long transcripts to avoid blowing context windows.
-	const maxLen = 100_000
+// FormatPrompt wraps the transcript in the security analysis prompt,
+// truncating if it exceeds maxLen characters.
+func FormatPrompt(transcript string, maxLen int) string {
+	if maxLen <= 0 {
+		maxLen = DefaultMaxTranscriptLen
+	}
 	if len(transcript) > maxLen {
 		transcript = transcript[:maxLen] + "\n... [truncated]"
 	}
