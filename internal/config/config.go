@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -11,22 +13,22 @@ import (
 
 // Defaults for configuration values not specified in the YAML file.
 const (
-	DefaultListenAddr    = "0.0.0.0:2022"
-	DefaultUpstreamPort  = 22
-	DefaultLogDir        = "./logs"
-	DefaultLLMProvider   = "anthropic"
-	DefaultAnthropicModel = "claude-sonnet-4-6"
-	DefaultOpenAIModel   = "gpt-4o"
+	DefaultListenAddr     = "0.0.0.0:2022"
+	DefaultUpstreamPort   = 22
+	DefaultLogDir         = "./logs"
+	DefaultLLMProvider    = "anthropic"
+	DefaultAnthropicModel = "claude-opus-5"
+	DefaultOpenAIModel    = "gpt-4o"
 )
 
 // Config is the top-level proxy configuration.
 type Config struct {
-	Listen     string         `yaml:"listen"`
-	HostKeyPath string        `yaml:"host_key"`
-	Upstream   UpstreamConfig `yaml:"upstream"`
-	Users      []UserConfig   `yaml:"users"`
-	LogDir     string         `yaml:"log_dir"`
-	LLM        LLMConfig     `yaml:"llm"`
+	Listen      string         `yaml:"listen"`
+	HostKeyPath string         `yaml:"host_key"`
+	Upstream    UpstreamConfig `yaml:"upstream"`
+	Users       []UserConfig   `yaml:"users"`
+	LogDir      string         `yaml:"log_dir"`
+	LLM         LLMConfig      `yaml:"llm"`
 }
 
 // UpstreamConfig describes how to connect to the upstream SSH server.
@@ -36,6 +38,7 @@ type UpstreamConfig struct {
 	Username       string `yaml:"username"`
 	Password       string `yaml:"password"`
 	PrivateKeyPath string `yaml:"private_key"` // path to PEM file
+	KnownHostsPath string `yaml:"known_hosts"` // optional; verifies the upstream host key
 }
 
 // UserConfig describes a user allowed to connect to the proxy.
@@ -50,9 +53,10 @@ type UserConfig struct {
 // LLMConfig controls the optional session-summary feature.
 // If APIKey is empty the feature is disabled.
 type LLMConfig struct {
-	Provider string `yaml:"provider"` // "anthropic" (default) | "openai"; empty ⇒ disabled
-	APIKey   string `yaml:"api_key"`
-	Model    string `yaml:"model"`    // optional; per-provider default used when empty
+	Provider           string `yaml:"provider"`             // "anthropic" (default) | "openai"
+	APIKey             string `yaml:"api_key"`              // empty ⇒ feature disabled
+	Model              string `yaml:"model"`                // optional; per-provider default used when empty
+	MaxTranscriptChars int    `yaml:"max_transcript_chars"` // optional; 0 ⇒ summarizer default
 }
 
 // Load reads and validates a YAML configuration file.
@@ -65,7 +69,11 @@ func Load(path string) (*Config, error) {
 	cfg := &Config{
 		Listen: DefaultListenAddr,
 	}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	// Reject unknown keys so that typos (e.g. "public_keys") fail loudly
+	// instead of silently disabling an auth method.
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
@@ -95,6 +103,8 @@ func (c *Config) validate() error {
 	}
 	if c.Upstream.Port == 0 {
 		c.Upstream.Port = DefaultUpstreamPort
+	} else if c.Upstream.Port < 0 || c.Upstream.Port > 65535 {
+		errs = append(errs, fmt.Sprintf("upstream.port out of range: %d", c.Upstream.Port))
 	}
 	if c.Upstream.Username == "" {
 		errs = append(errs, "upstream.username is required")
@@ -104,6 +114,9 @@ func (c *Config) validate() error {
 	}
 	if c.Upstream.PrivateKeyPath != "" && !fileExists(c.Upstream.PrivateKeyPath) {
 		errs = append(errs, fmt.Sprintf("upstream.private_key file not found: %s", c.Upstream.PrivateKeyPath))
+	}
+	if c.Upstream.KnownHostsPath != "" && !fileExists(c.Upstream.KnownHostsPath) {
+		errs = append(errs, fmt.Sprintf("upstream.known_hosts file not found: %s", c.Upstream.KnownHostsPath))
 	}
 
 	// Users validation.
@@ -154,6 +167,9 @@ func (c *Config) validate() error {
 		}
 		c.LLM.Provider = p
 	}
+	if c.LLM.MaxTranscriptChars < 0 {
+		errs = append(errs, "llm.max_transcript_chars must not be negative")
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
@@ -172,19 +188,10 @@ func (u *UpstreamConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", u.Host, u.Port)
 }
 
-// LLMEnabled reports whether a valid LLM configuration is present.
-// This is reliable only after Load (which calls validate), because validate
-// populates Provider when only APIKey is given.
+// LLMEnabled reports whether an LLM API key is configured. The key itself is
+// verified against the provider when the server starts.
 func (c *Config) LLMEnabled() bool {
 	return c.LLM.APIKey != ""
-}
-
-// ResolveRelativeTo returns path as-is if absolute, otherwise joined to base.
-func ResolveRelativeTo(base, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(base, path)
 }
 
 func fileExists(path string) bool {

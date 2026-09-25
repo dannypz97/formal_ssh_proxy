@@ -210,3 +210,50 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestLoadRejectsInvalid(t *testing.T) {
+	appendYAML := func(extra string) func(string) string {
+		return func(base string) string { return base + extra }
+	}
+	tests := []struct {
+		name    string
+		edit    func(base string) string
+		wantErr string
+	}{
+		{"unknown key", appendYAML("log_directory: /tmp\n"), "log_directory"},
+		{"misspelled nested key", appendYAML("llm:\n  apikey: x\n"), "apikey"},
+		{"negative transcript limit", appendYAML("llm:\n  max_transcript_chars: -1\n"), "max_transcript_chars"},
+		{
+			"missing known_hosts file",
+			func(base string) string {
+				return strings.Replace(base, `  host: "upstream"`, `  host: "upstream"
+  known_hosts: "/nonexistent/known_hosts"`, 1)
+			},
+			"known_hosts file not found",
+		},
+		{
+			"upstream port out of range",
+			func(base string) string {
+				return strings.Replace(base, `  host: "upstream"`, `  host: "upstream"
+  port: 70000`, 1)
+			},
+			"upstream.port",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, err := loadFromYAML(t, dir, tt.edit(baseConfigYAML(t, dir)))
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("err = %v, want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadEmptyFile(t *testing.T) {
+	_, err := loadFromYAML(t, t.TempDir(), "# nothing here\n")
+	if err == nil || !strings.Contains(err.Error(), "host_key is required") {
+		t.Errorf("err = %v, want validation errors", err)
+	}
+}
